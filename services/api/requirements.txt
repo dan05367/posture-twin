@@ -1,0 +1,8 @@
+fastapi==0.115.5
+uvicorn==0.32.1
+pydantic>=2.7,<3
+pandas==2.2.3
+numpy==1.26.4
+scikit-learn==1.5.2
+mlflow-skinny==2.16.2
+prometheus-client==0.21.0
