@@ -1,0 +1,4 @@
+cat > services/api/requirements-dev.txt << 'EOF'
+pytest>=7.4
+httpx>=0.27
+EOF
