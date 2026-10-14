@@ -18,7 +18,7 @@ posture-twin/
 ## 1. 讓訓練環境與 API 的版本一致（重要）
 模型是 pickle 存的，scikit-learn 版本不同可能載入失敗或結果不同。
 ```bash
-cd services/training
+cd ml
 pip install scikit-learn==1.5.2
 python train.py --data <你的資料夾> --register   # 重新訓練並註冊
 ```
@@ -37,7 +37,7 @@ docker compose logs -f api          # 看有沒有 "loaded model from models:/..
 ```bash
 curl localhost:8000/health
 curl -X POST localhost:8000/features -H 'content-type: application/json' \
-  -d '{"deviations":{"shoulder_tilt":0,"head_roll":0,"head_offset":0,"head_drop":-0.3,"shrug":0,"lean":1.0}}'
+  -d '{"deviations":{"shoulder_tilt":0,"head_roll":0,"head_offset":0,"head_drop":,"shrug":0,"lean":1.0}}'
 curl localhost:8000/twin
 curl localhost:8000/metrics
 ```
