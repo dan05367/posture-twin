@@ -1,8 +1,7 @@
-cat > .gitignore << 'EOF'
 .venv/
 __pycache__/
 mlflow_data/
 mlruns/
 calibration.json
 data/fake/
-EOF
+monitoring/reference/*.csv

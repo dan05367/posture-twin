@@ -1,0 +1,39 @@
+# 警報會顯示在 Prometheus 的 Alerts 頁面（http://localhost:9090/alerts）。
+# 目前沒有接 Alertmanager，所以不會寄信或發通知。
+groups:
+  - name: posture
+    rules:
+      - alert: ApiDown
+        expr: up{job="api"} == 0
+        for: 1m
+        labels: {severity: critical}
+        annotations:
+          summary: "Posture API 無法連線"
+
+      - alert: NoSensorData
+        expr: posture_seconds_since_last_sample > 120
+        for: 2m
+        labels: {severity: warning}
+        annotations:
+          summary: "超過 2 分鐘沒有收到 Edge 的資料（Edge 沒開或鏡頭中斷？）"
+
+      - alert: ModelFallback
+        expr: posture_model_loaded == 0
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "API 正在使用規則式備援，沒有載入 MLflow 模型"
+
+      - alert: DataDrift
+        expr: posture_dataset_drift == 1
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "特徵分佈與訓練資料明顯不同（鏡頭角度、光線或校準可能已改變）"
+
+      - alert: PoorPostureSustained
+        expr: posture_window_bad_ratio > 0.5
+        for: 10m
+        labels: {severity: info}
+        annotations:
+          summary: "最近 10 分鐘有一半以上時間姿勢不良"

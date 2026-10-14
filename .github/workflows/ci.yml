@@ -35,6 +35,36 @@ jobs:
         working-directory: services/api
         run: pytest -q
 
+  test-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+          cache-dependency-path: services/drift/requirements-dev.txt
+      - name: Install
+        working-directory: services/drift
+        run: pip install -r requirements-dev.txt
+      - name: Test
+        working-directory: services/drift
+        run: pytest -q
+
+  validate-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate docker-compose
+        run: docker compose config -q
+      - name: Validate Prometheus config and alert rules
+        run: |
+          docker run --rm --entrypoint promtool \
+            -v "$PWD/monitoring/prometheus:/etc/prometheus:ro" \
+            prom/prometheus:v2.55.1 check config /etc/prometheus/prometheus.yml
+      - name: Validate Grafana dashboard JSON
+        run: python3 -m json.tool monitoring/grafana/dashboards/posture.json > /dev/null
+
   docker:
     needs: [test-edge, test-api]
     runs-on: ubuntu-latest
@@ -51,8 +81,8 @@ jobs:
           context: ./services/api
           load: true
           tags: posture-api:ci
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,mode=max,scope=api
 
       - name: Smoke test container
         run: |
@@ -66,6 +96,8 @@ jobs:
             -H 'content-type: application/json' \
             -d '{"deviations":{"shoulder_tilt":0,"head_roll":0,"head_offset":0,"head_drop":-0.3,"shrug":0,"lean":1.0}}' \
             | grep '"label":"slouch"'
+          curl -fsS http://localhost:8000/metrics | grep posture_deviation
+          curl -fsS "http://localhost:8000/recent?limit=5" | grep '"count":1'
 
       - name: Show container logs on failure
         if: failure()
@@ -96,4 +128,36 @@ jobs:
           context: ./services/api
           push: true
           tags: ${{ steps.meta.outputs.tags }}
-          cache-from: type=gha
+          cache-from: type=gha,scope=api
+
+  docker-drift:
+    needs: [test-drift]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build drift image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./services/drift
+          load: true
+          tags: posture-drift:ci
+          cache-from: type=gha,scope=drift
+          cache-to: type=gha,mode=max,scope=drift
+
+      - name: Smoke test container (no reference file mounted)
+        run: |
+          docker run -d --name drift -p 8001:8001 posture-drift:ci
+          for i in $(seq 1 30); do
+            curl -fs http://localhost:8001/health && break
+            sleep 1
+          done
+          sleep 2
+          curl -fsS http://localhost:8001/health | grep -E '"status": ?"ok"'
+          curl -fsS http://localhost:8001/status | grep no_reference
+          curl -fsS http://localhost:8001/metrics | grep posture_drift_share
+
+      - name: Show container logs on failure
+        if: failure()
+        run: docker logs drift

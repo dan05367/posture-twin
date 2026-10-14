@@ -1,0 +1,5 @@
+numpy==1.26.4
+pandas==2.2.3
+scipy==1.13.1
+prometheus-client==0.21.0
+evidently==0.4.40
