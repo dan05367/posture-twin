@@ -71,3 +71,26 @@ def test_reload_falls_back_without_uri(client):
     r = client.post("/reload")
     assert r.status_code == 200
     assert r.json()["model_loaded"] is False
+
+
+def test_recent_endpoint(client):
+    for _ in range(3):
+        post(client, GOOD)
+    for _ in range(4):
+        post(client, SLOUCH)
+    everything = client.get("/recent", params={"limit": 100}).json()
+    assert everything["count"] == 7
+    assert set(GOOD) <= set(everything["rows"][0])
+
+    only_good = client.get("/recent", params={"stable_label": "good", "limit": 100}).json()
+    assert only_good["count"] >= 3
+    assert all(r["stable_label"] == "good" for r in only_good["rows"])
+
+
+def test_monitoring_metrics_exposed(client):
+    post(client, GOOD)
+    text = client.get("/metrics").text
+    for name in ["posture_confidence", "posture_deviation", "posture_stable_label",
+                 "posture_window_bad_ratio", "posture_model_loaded",
+                 "posture_seconds_since_last_sample", "posture_bad_seconds"]:
+        assert name in text, name
