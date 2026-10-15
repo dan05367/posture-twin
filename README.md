@@ -1,10 +1,8 @@
 # Posture Twin：即時坐姿矯正的 Digital Twin 與 MLOps 系統
 
-![CI](https://github.com/dan05367/MLProject/actions/workflows/ci.yml/badge.svg)
-
 用一般視訊鏡頭即時判斷坐姿，在虛擬人偶上呈現你的身體狀態，並建立一套完整的 MLOps 閉環：**資料版本控管 → 實驗追蹤 → 服務部署 → 監控與 drift 偵測 → 使用者回饋 → 自動重新訓練 → 新模型上線**。
 
-![demo](docs/images/demo.gif)
+![demo](docs/image/main.gif)
 <!-- 放一張 GIF 或截圖：左邊是鏡頭畫面，右邊是 /ui 的人偶。面試官 10 秒內要能看懂這個專案在做什麼 -->
 
 ## 這個專案展示了什麼
@@ -19,28 +17,6 @@
 | 資料 drift 偵測 | PSI + KS 檢定，比較即時資料與訓練資料的分佈 |
 | 持續訓練 | 使用者按「其實是…」產生新標註 → 累積足夠後自動重新訓練 → 通過把關才上線 |
 
-## 系統架構
-
-```mermaid
-flowchart LR
-  subgraph W[Windows 本機]
-    CAM[鏡頭] --> EDGE[Edge：MediaPipe<br/>特徵 + 平滑 + 校準]
-  end
-  EDGE -->|只傳數值特徵，不傳影像| API
-  subgraph D[Docker Compose]
-    API[FastAPI<br/>推論 + Digital Twin] --- MLF[(MLflow<br/>Model Registry)]
-    API -->|/metrics| PROM[Prometheus] --> GRAF[Grafana]
-    DRIFT[Drift 服務<br/>PSI / KS] -->|/recent| API
-    DRIFT -->|/metrics| PROM
-    RETRAIN[Retrain 服務] -->|訓練並註冊| MLF
-    RETRAIN -->|/reload| API
-  end
-  API --> UI[網頁人偶 /ui]
-  UI -->|使用者更正| FB[(data/feedback)]
-  FB --> RETRAIN
-  RETRAIN --> N[Discord / ntfy 通知]
-  DRIFT --> N
-```
 
 **為什麼 Edge 不放進 Docker**：Docker 在 WSL2 裡抓不到 Windows 的鏡頭，所以鏡頭程式在 Windows 原生執行，只把數值特徵傳給服務。這也讓影像永遠不離開使用者的電腦，是刻意的隱私設計。
 
@@ -56,26 +32,14 @@ flowchart LR
 
 ## 成果
 
-> 請填入你自己跑出來的真實數字，不要留空白或估算。
 
 | 指標 | 規則式 baseline | LogisticRegression | RandomForest |
 |---|---|---|---|
-| macro F1（依 session 分組交叉驗證） | `<填入>` | `<填入>` | `<填入>` |
+| macro F1（依 session 分組交叉驗證） | `0.55` | `0.50` | `0.66` |
 
-- 資料量：`<N>` 筆、`<M>` 個 session、`<K>` 種姿勢
-- 推論延遲 p95：`<填入>` ms（Grafana 面板）
-- 混淆矩陣與 MLflow 截圖：`docs/images/`
-
-```
-edge/        Windows 原生：鏡頭、MediaPipe、特徵、校準、錄製、通知
-ml/          訓練腳本、模型上線把關（gating）、reference 產生、drift 模擬
-services/
-  api/       FastAPI 推論 + digital twin + 人偶網頁 + 使用者回饋
-  drift/     資料 drift 偵測（PSI / KS，輸出 Prometheus 指標）
-  retrain/   自動重新訓練與通知
-monitoring/  Prometheus 設定與警報、Grafana 儀表板（自動載入）
-.github/     CI：測試、驗證、建置、smoke test、推送映像檔
-```
+- 資料量：`4277` 筆、`3` 個 session、`5` 種姿勢
+- 推論延遲 p95：`49` ms（Grafana 面板）
+- 混淆矩陣與 MLflow 截圖：![conjuntion matrix](docs/image/confusion_matrix.png)
 
 ## 測試與 CI
 
