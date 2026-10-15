@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Posture Twin</title>
+<style>
+:root{--bg:#f4f5f8;--card:#fff;--fg:#1c2230;--mut:#667085;--line:#e3e6ec;--good:#16a34a;--slouch:#dc2626;--lean_forward:#d97706;--head_tilt:#7c3aed;--shoulder_uneven:#2563eb}
+@media(prefers-color-scheme:dark){:root{--bg:#10131a;--card:#1a1f2c;--fg:#e8ebf2;--mut:#98a2b8;--line:#2b3246}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px system-ui,"Noto Sans TC","Microsoft JhengHei",sans-serif}
+main{max-width:920px;margin:0 auto;padding:16px;display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:720px){main{grid-template-columns:1fr}}
+h1{grid-column:1/-1;margin:0;font-size:20px;display:flex;justify-content:space-between;align-items:center}
+#conn{font-size:13px;color:var(--mut)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px}
+.card h2{margin:0 0 10px;font-size:13px;color:var(--mut);font-weight:600}
+#av{width:100%;max-height:330px}
+#av .limb{stroke:var(--c,var(--good));stroke-linecap:round;fill:none}
+#av .fill{fill:var(--c,var(--good));opacity:.18}
+#av .face{fill:var(--card);stroke:var(--c,var(--good));stroke-width:5}
+#av .dot{fill:var(--c,var(--good))}
+#state{font-size:26px;font-weight:700;color:var(--c,var(--good))}
+.row{display:flex;align-items:center;gap:8px;margin:5px 0;font-size:13px}
+.row span:first-child{width:92px;color:var(--mut)}
+.bar{flex:1;height:8px;border-radius:4px;background:var(--line);overflow:hidden}
+.bar i{display:block;height:100%}
+.stack{display:flex;height:14px;border-radius:7px;overflow:hidden;background:var(--line)}
+.kv{display:flex;justify-content:space-between;margin:6px 0}.kv b{font-variant-numeric:tabular-nums}
+.btns{display:flex;flex-wrap:wrap;gap:8px}
+button{font:inherit;padding:8px 12px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg);cursor:pointer}
+button:hover{border-color:var(--mut)}
+#msg{margin-top:10px;font-size:13px;color:var(--mut);min-height:18px}
+</style>
+</head>
+<body>
+<main>
+<h1>Posture Twin <span id="conn">連線中…</span></h1>
+
+<section class="card">
+  <h2>即時虛擬人偶（正面，鏡像）</h2>
+  <svg id="av" viewBox="0 0 300 300">
+    <g id="fig">
+      <path class="fill" d="M55 300 L72 222 Q150 196 228 222 L245 300Z"/>
+      <g id="sh">
+        <line class="limb" x1="80" y1="215" x2="220" y2="215" stroke-width="14"/>
+        <circle class="dot" cx="80" cy="215" r="9"/><circle class="dot" cx="220" cy="215" r="9"/>
+      </g>
+      <g id="hd">
+        <line class="limb" x1="150" y1="205" x2="150" y2="168" stroke-width="10"/>
+        <circle class="face" cx="150" cy="130" r="38"/>
+        <circle class="dot" cx="137" cy="124" r="4"/><circle class="dot" cx="163" cy="124" r="4"/>
+        <line class="limb" x1="150" y1="128" x2="150" y2="142" stroke-width="3"/>
+      </g>
+    </g>
+  </svg>
+</section>
+
+<section class="card">
+  <h2>目前姿勢</h2>
+  <div id="state">等待 Edge 資料…</div>
+  <div id="probs" style="margin-top:12px"></div>
+  <div class="kv"><span>目前連續不良</span><b id="streak">–</b></div>
+  <div class="kv"><span>不良姿勢累計</span><b id="total">–</b></div>
+  <div class="kv"><span>資料更新</span><b id="age">–</b></div>
+</section>
+
+<section class="card">
+  <h2>最近 10 分鐘分佈</h2>
+  <div class="stack" id="win"></div>
+  <div id="legend" style="margin-top:8px;font-size:12px;color:var(--mut)"></div>
+</section>
+
+<section class="card">
+  <h2>判斷錯了？告訴我實際的姿勢（標記最近 10 秒）</h2>
+  <div class="btns" id="fb"></div>
+  <div id="msg"></div>
+</section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const NAMES = {good:"姿勢良好", slouch:"駝背 / 低頭", lean_forward:"過度前傾", head_tilt:"歪頭", shoulder_uneven:"高低肩"};
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const W = 140;                                   // 人偶肩寬（SVG 單位）
+const cur = {tilt:0, roll:0, dx:0, dy:0, sy:0, s:1}, tgt = {...cur};
+
+function setTarget(d) {
+  tgt.tilt = clamp(d.shoulder_tilt, -25, 25);
+  tgt.roll = clamp(d.head_roll, -35, 35);
+  tgt.dx = clamp(d.head_offset * W, -60, 60);
+  tgt.sy = clamp(d.shrug * W, -40, 40);          // shrug 偏差為負 = 聳肩 = 肩膀上移
+  tgt.dy = clamp(-d.head_drop * W, -40, 60);     // head_drop 偏差為負 = 頭下沉
+  tgt.s = clamp(d.lean, 0.8, 1.4);
+}
+function frame() {
+  for (const k in cur) cur[k] += (tgt[k] - cur[k]) * 0.18;
+  $("fig").setAttribute("transform", `translate(150 300) scale(${cur.s}) translate(-150 -300)`);
+  $("sh").setAttribute("transform", `translate(0 ${cur.sy}) rotate(${cur.tilt} 150 215)`);
+  $("hd").setAttribute("transform", `translate(${cur.dx} ${cur.sy + cur.dy}) rotate(${cur.roll} 150 168)`);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+function render(t) {
+  if (!t.has_data) { $("state").textContent = "等待 Edge 資料…"; return; }
+  const c = `var(--${t.stable_label})`;
+  document.documentElement.style.setProperty("--c", c);
+  $("state").textContent = NAMES[t.stable_label] || t.stable_label;
+  setTarget(t.deviations);
+
+  const probs = Object.entries(t.probabilities).sort((a, b) => b[1] - a[1]);
+  $("probs").replaceChildren(...probs.map(([k, p]) => {
+    const row = document.createElement("div"); row.className = "row";
+    row.innerHTML = "<span></span><div class='bar'><i></i></div><span style='width:40px;text-align:right'></span>";
+    row.children[0].textContent = NAMES[k] || k;
+    row.querySelector("i").style.cssText = `width:${p * 100}%;background:var(--${k})`;
+    row.children[2].textContent = (p * 100).toFixed(0) + "%";
+    return row;
+  }));
+
+  $("streak").textContent = t.bad_streak_sec + " 秒";
+  $("total").textContent = Math.round(t.bad_seconds_total) + " 秒";
+  $("age").textContent = t.age_sec > 5 ? `${t.age_sec.toFixed(0)} 秒前（Edge 可能中斷）` : "即時";
+
+  const counts = t.window_counts, n = Object.values(counts).reduce((a, b) => a + b, 0) || 1;
+  $("win").replaceChildren(...Object.entries(counts).map(([k, v]) => {
+    const i = document.createElement("i"); i.style.cssText = `width:${v / n * 100}%;background:var(--${k})`; return i;
+  }));
+  $("legend").textContent = Object.entries(counts).map(([k, v]) => `${NAMES[k] || k} ${(v / n * 100).toFixed(0)}%`).join("　");
+}
+
+async function tick() {
+  try {
+    render(await (await fetch("/twin")).json());
+    $("conn").textContent = "已連線";
+  } catch (e) { $("conn").textContent = "連不到 API"; }
+}
+setInterval(tick, 1000); tick();
+
+for (const [k, name] of Object.entries(NAMES)) {
+  const b = document.createElement("button"); b.textContent = "其實是：" + name;
+  b.onclick = async () => {
+    const r = await fetch("/feedback", {method: "POST", headers: {"content-type": "application/json"},
+                                        body: JSON.stringify({label: k, seconds: 10})});
+    const j = await r.json();
+    $("msg").textContent = r.ok ? `已儲存 ${j.saved} 筆，標記為「${name}」` : (j.detail || "儲存失敗");
+  };
+  $("fb").appendChild(b);
+}
+</script>
+</body>
+</html>

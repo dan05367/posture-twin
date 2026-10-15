@@ -51,6 +51,22 @@ jobs:
         working-directory: services/drift
         run: pytest -q
 
+  test-retrain:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Install
+        run: pip install pytest
+      - name: Test retrain service logic
+        working-directory: services/retrain
+        run: pytest -q
+      - name: Test model-promotion gate
+        working-directory: ml
+        run: pytest -q
+
   validate-config:
     runs-on: ubuntu-latest
     steps:
@@ -98,6 +114,7 @@ jobs:
             | grep '"label":"slouch"'
           curl -fsS http://localhost:8000/metrics | grep posture_deviation
           curl -fsS "http://localhost:8000/recent?limit=5" | grep '"count":1'
+          curl -fsS http://localhost:8000/ui | grep "<svg" > /dev/null
 
       - name: Show container logs on failure
         if: failure()

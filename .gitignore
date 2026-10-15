@@ -5,3 +5,5 @@ mlruns/
 calibration.json
 data/fake/
 monitoring/reference/*.csv
+data/feedback/
+.env

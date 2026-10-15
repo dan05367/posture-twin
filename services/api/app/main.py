@@ -1,13 +1,16 @@
 import logging
+import os
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 
-from fastapi import FastAPI, Query
-from fastapi.responses import Response
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import FileResponse, RedirectResponse, Response
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
 
+from .feedback import save_feedback
 from .predictor import load_predictor
-from .schema import DEV_NAMES, LABELS, FeaturePayload, Prediction
+from .schema import DEV_NAMES, LABELS, FeaturePayload, FeedbackPayload, Prediction
 from .twin import TwinState
 
 logging.basicConfig(level=logging.INFO)
@@ -19,6 +22,8 @@ CONFIDENCE = Histogram("posture_confidence", "Max class probability of each pred
                        buckets=(0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 1.0))
 DEVIATION = Gauge("posture_deviation", "Latest deviation from calibrated baseline", ["feature"])
 STABLE = Gauge("posture_stable_label", "1 for the current stable label, else 0", ["label"])
+FEEDBACK = Counter("posture_feedback_total", "Rows labeled by user corrections", ["predicted", "actual"])
+STATIC = Path(__file__).parent / "static"
 
 
 def _twin_value(key: str, default: float = float("nan")) -> float:
@@ -46,10 +51,11 @@ Gauge("posture_model_loaded", "1 if an MLflow model is loaded, 0 if using rule f
 async def lifespan(app: FastAPI):
     app.state.predictor = load_predictor()
     app.state.twin = TwinState()
+    app.state.last_feedback_ts = 0.0
     yield
 
 
-app = FastAPI(title="Posture Twin API", version="0.2.0", lifespan=lifespan)
+app = FastAPI(title="Posture Twin API", version="0.3.0", lifespan=lifespan)
 
 
 @app.get("/health")
@@ -100,3 +106,31 @@ def reload_model():
 @app.get("/metrics")
 def metrics():
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+
+@app.post("/feedback")
+def feedback(payload: FeedbackPayload):
+    """使用者更正：把最近 N 秒的資料標成正確的姿勢，存起來供重新訓練使用。"""
+    since = max(time.time() - payload.seconds, app.state.last_feedback_ts + 1e-6)
+    rows = app.state.twin.recent(limit=600, since=since)
+    if not rows:
+        raise HTTPException(409, "no new samples to label (already labeled, or no data in that window)")
+    try:
+        n, path = save_feedback(os.getenv("FEEDBACK_DIR", "/data/feedback"), payload.label, rows)
+    except OSError as e:
+        raise HTTPException(500, f"cannot write feedback file: {e}")
+    app.state.last_feedback_ts = rows[-1]["ts"]
+    for r in rows:
+        FEEDBACK.labels(predicted=r["stable_label"], actual=payload.label).inc()
+    return {"saved": n, "label": payload.label, "file": path.name}
+
+
+@app.get("/ui", include_in_schema=False)
+def ui():
+    """Digital twin 的網頁畫面。"""
+    return FileResponse(STATIC / "twin.html")
+
+
+@app.get("/", include_in_schema=False)
+def root():
+    return RedirectResponse("/ui")

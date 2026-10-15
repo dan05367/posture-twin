@@ -37,3 +37,18 @@ groups:
         labels: {severity: info}
         annotations:
           summary: "最近 10 分鐘有一半以上時間姿勢不良"
+
+  - name: retraining
+    rules:
+      - alert: RetrainFailed
+        expr: increase(retrain_runs_total{outcome="failed"}[1h]) > 0
+        labels: {severity: warning}
+        annotations:
+          summary: "自動重新訓練失敗（看 http://localhost:8002/status 或 docker compose logs retrain）"
+
+      - alert: RetrainServiceDown
+        expr: up{job="retrain"} == 0
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "重新訓練服務無法連線"

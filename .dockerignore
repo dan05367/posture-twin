@@ -1,0 +1,12 @@
+# 只影響以專案根目錄為 context 的建置（目前是 retrain 服務）
+.git
+.dvc
+.venv
+**/__pycache__
+data
+mlflow_data
+monitoring
+docs
+edge
+services/api
+services/drift

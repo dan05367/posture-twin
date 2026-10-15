@@ -55,10 +55,13 @@ class TwinState:
                           "updated_at": now}
             return stable
 
-    def recent(self, limit: int = 1000, stable_label: str | None = None) -> list:
-        """最近 limit 筆特徵（可只取某個穩定標籤），由舊到新。"""
+    def recent(self, limit: int = 1000, stable_label: str | None = None,
+               since: float | None = None) -> list:
+        """最近 limit 筆特徵（可只取某個穩定標籤、某個時間之後），由舊到新。"""
         with self._lock:
-            rows = [r for r in self._rows if stable_label is None or r["stable_label"] == stable_label]
+            rows = [r for r in self._rows
+                    if (stable_label is None or r["stable_label"] == stable_label)
+                    and (since is None or r["ts"] >= since)]
             return rows[-limit:]
 
     def snapshot(self, now=None) -> dict:

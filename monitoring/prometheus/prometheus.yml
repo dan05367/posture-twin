@@ -16,6 +16,11 @@ scrape_configs:
     static_configs:
       - targets: ["drift:8001"]
 
+  - job_name: retrain
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["retrain:8002"]
+
   - job_name: prometheus
     static_configs:
       - targets: ["localhost:9090"]

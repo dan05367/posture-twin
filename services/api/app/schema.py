@@ -21,6 +21,19 @@ class FeaturePayload(BaseModel):
         return v
 
 
+class FeedbackPayload(BaseModel):
+    """使用者更正：「剛剛這段時間，實際的姿勢是 label」。"""
+    label: str
+    seconds: float = Field(10.0, gt=0, le=120)   # 往回標記最近幾秒的資料
+
+    @field_validator("label")
+    @classmethod
+    def _check_label(cls, v):
+        if v not in LABELS:
+            raise ValueError(f"label must be one of {LABELS}")
+        return v
+
+
 class Prediction(BaseModel):
     label: str                      # 這一筆的原始預測
     stable_label: str               # 最近幾筆投票後的結果（減少閃爍）

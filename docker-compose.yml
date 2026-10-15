@@ -4,6 +4,8 @@ services:
     restart: unless-stopped
     ports:
       - "5000:5000"
+    environment:
+      TZ: Asia/Taipei
     volumes:
       - ./mlflow_data:/mlflow
     command: >
@@ -19,11 +21,17 @@ services:
 
   api:
     build: ./services/api
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
     ports:
       - "8000:8000"
     environment:
       MLFLOW_TRACKING_URI: http://mlflow:5000
       MODEL_URI: models:/posture-classifier/latest
+      FEEDBACK_DIR: /data/feedback
+      HOME: /tmp
+      TZ: Asia/Taipei
+    volumes:
+      - ./data/feedback:/data/feedback      # 使用者更正的標註（請先 mkdir -p data/feedback）
     depends_on:
       mlflow:
         condition: service_healthy
@@ -39,10 +47,40 @@ services:
       CHECK_INTERVAL_SEC: "30"
       DRIFT_FILTER_LABEL: good
       PSI_THRESHOLD: "0.2"
+      TZ: Asia/Taipei
     volumes:
       - ./monitoring/reference:/reference:ro
     depends_on:
       - api
+    restart: unless-stopped
+
+  retrain:
+    build:
+      context: .
+      dockerfile: services/retrain/Dockerfile
+    ports:
+      - "8002:8002"
+    environment:
+      TZ: Asia/Taipei
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      API_URL: http://api:8000
+      DRIFT_URL: http://drift:8001
+      DATA_DIRS: /data/raw,/data/feedback
+      MIN_NEW_ROWS: "100"                  # 新增幾筆標註才重新訓練
+      MIN_INTERVAL_SEC: "21600"            # 兩次訓練至少間隔 6 小時
+      CHECK_INTERVAL_SEC: "600"
+      # 通知管道（寫在 .env 檔裡，沒設定的就不會發送）
+      DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+      NTFY_TOPIC: ${NTFY_TOPIC:-}
+    volumes:
+      - ./data:/data:ro
+      - retrain_state:/state
+    depends_on:
+      mlflow:
+        condition: service_healthy
+      api:
+        condition: service_started
     restart: unless-stopped
 
   prometheus:
@@ -78,3 +116,4 @@ services:
 volumes:
   prometheus_data:
   grafana_data:
+  retrain_state:

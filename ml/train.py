@@ -1,13 +1,11 @@
-"""Week 2 訓練腳本：
-讀取錄製的 CSV -> 依 session 分組交叉驗證 -> 比較 規則式 / LogisticRegression / RandomForest
--> 全部記錄到 MLflow -> 用最佳模型在全部資料上重訓並（選擇性）註冊到 Model Registry。
-
-
-true data
-python train.py --data /mnt/d/MLProject/data
+"""訓練腳本 v2（第 5 週）：
+- --data 可以放多個資料夾（錄製的 data/raw + 使用者回饋的 data/feedback）
+- --register-if-better：通過把關（gating）才註冊新版本，不會讓變差的模型上線
+- --summary-json：把結果寫成 JSON，給自動重訓練服務讀取
 """
 import argparse
 import hashlib
+import json
 import os
 from pathlib import Path
 
@@ -19,7 +17,9 @@ import mlflow
 import mlflow.sklearn
 import numpy as np
 import pandas as pd
+from gating import decide_registration
 from mlflow.models import infer_signature
+from mlflow.tracking import MlflowClient
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (ConfusionMatrixDisplay, accuracy_score,
@@ -27,6 +27,8 @@ from sklearn.metrics import (ConfusionMatrixDisplay, accuracy_score,
 from sklearn.model_selection import GroupKFold, cross_val_predict
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
+
+ROOT = Path(__file__).resolve().parents[1]
 
 # 用「相對於個人基準的偏差」當特徵，這樣不同人 / 不同鏡頭距離都能共用同一個模型
 FEATURES = ["dev_shoulder_tilt", "dev_head_roll", "dev_head_offset",
@@ -38,10 +40,10 @@ THRESH = {"shoulder_tilt": 5.0, "head_roll": 8.0, "head_offset": 0.15,
           "head_drop": 0.12, "shrug": 0.10, "lean": 1.15}
 
 
-def load(data_dir: str):
-    files = sorted(Path(data_dir).glob("*.csv"))
+def load(data_dirs):
+    files = sorted(f for d in data_dirs if Path(d).is_dir() for f in Path(d).glob("*.csv"))
     if not files:
-        raise SystemExit(f"{data_dir} 裡找不到 CSV，請先錄製資料（或跑 make_fake_data.py）")
+        raise SystemExit(f"{list(map(str, data_dirs))} 裡找不到 CSV，請先錄製資料（或跑 make_fake_data.py）")
     df = pd.concat([pd.read_csv(f) for f in files], ignore_index=True)
     md5 = hashlib.md5()
     for f in files:
@@ -97,13 +99,34 @@ def build_models(seed: int):
     }
 
 
+def champion_cv_f1(model_name: str):
+    """目前已註冊的最新版本，當時訓練記錄的 best_macro_f1；沒有就回傳 None。"""
+    client = MlflowClient()
+    try:
+        versions = client.search_model_versions(f"name='{model_name}'")
+        if not versions:
+            return None
+        latest = max(versions, key=lambda v: int(v.version))
+        run = client.get_run(latest.run_id)
+        parent = run.data.tags.get("mlflow.parentRunId")
+        source = client.get_run(parent) if parent else run
+        return source.data.metrics.get("best_macro_f1")
+    except Exception:
+        return None
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--data", default="../../data/raw")
+    ap.add_argument("--data", nargs="+", default=[str(ROOT / "data" / "raw"), str(ROOT / "data" / "feedback")])
     ap.add_argument("--tracking-uri", default=os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000"))
     ap.add_argument("--experiment", default="posture-classifier")
-    ap.add_argument("--register", action="store_true", help="把最佳模型註冊到 Model Registry")
+    ap.add_argument("--register", action="store_true", help="一律註冊最佳模型（不把關）")
+    ap.add_argument("--register-if-better", action="store_true", help="通過把關才註冊")
+    ap.add_argument("--min-f1", type=float, default=0.7)
+    ap.add_argument("--tolerance", type=float, default=0.02)
     ap.add_argument("--model-name", default="posture-classifier")
+    ap.add_argument("--reason", default="manual", help="這次訓練的原因，會記錄成 MLflow tag")
+    ap.add_argument("--summary-json", default=None)
     ap.add_argument("--seed", type=int, default=42)
     args = ap.parse_args()
 
@@ -117,20 +140,21 @@ def main():
     mlflow.set_tracking_uri(args.tracking_uri)
     mlflow.set_experiment(args.experiment)
 
-    with mlflow.start_run(run_name="compare"):
+    with mlflow.start_run(run_name="compare") as parent:
         mlflow.log_params({
             "data_hash": data_hash, "n_files": n_files, "n_rows": len(df),
             "n_sessions": n_sessions, "cv": f"GroupKFold({cv.n_splits})",
             "features": ",".join(FEATURES), "seed": args.seed,
         })
+        mlflow.set_tag("trigger_reason", args.reason)
         mlflow.log_dict(df["label"].value_counts().to_dict(), "class_counts.json")
 
-        scores = {}
         with mlflow.start_run(run_name="rule_based", nested=True):
             mlflow.log_param("model_type", "rule_based")
             rule_f1 = log_eval(y, rule_predict(df))
         mlflow.log_metric("rule_based_macro_f1", rule_f1)
 
+        scores = {}
         models = build_models(args.seed)
         for name, (model, params) in models.items():
             with mlflow.start_run(run_name=name, nested=True):
@@ -145,17 +169,36 @@ def main():
         mlflow.log_param("best_model", best)
         mlflow.log_metric("best_macro_f1", scores[best])
 
+        champion_f1 = None
+        if args.register_if_better:
+            champion_f1 = champion_cv_f1(args.model_name)
+            ok, why = decide_registration(scores[best], rule_f1, champion_f1, args.min_f1, args.tolerance)
+        elif args.register:
+            ok, why = True, "--register (no gate)"
+        else:
+            ok, why = False, "registration not requested"
+        mlflow.set_tags({"registered": str(ok), "gate_reason": why})
+
+        version = None
         with mlflow.start_run(run_name=f"final_{best}", nested=True):
             final, _ = models[best]
             final.fit(X, y)
             sig = infer_signature(X, final.predict(X))
             mlflow.log_dict({"features": FEATURES, "labels": LABELS}, "schema.json")
             mlflow.log_param("trained_on_rows", len(df))
-            mlflow.sklearn.log_model(
-                final, artifact_path="model", signature=sig, input_example=X.head(3),
-                registered_model_name=args.model_name if args.register else None,
-            )
-        print(f"best model: {best}  (macro_f1={scores[best]:.3f})")
+            info = mlflow.sklearn.log_model(final, artifact_path="model", signature=sig,
+                                            input_example=X.head(3))
+            if ok:
+                version = mlflow.register_model(info.model_uri, args.model_name).version
+
+        print(f"best model: {best} (macro_f1={scores[best]:.3f})  registered={ok} version={version}  [{why}]")
+        if args.summary_json:
+            Path(args.summary_json).write_text(json.dumps({
+                "registered": ok, "reason": why, "model_version": version,
+                "best_model": best, "best_macro_f1": scores[best], "rule_macro_f1": rule_f1,
+                "champion_macro_f1": champion_f1, "n_rows": len(df), "n_sessions": n_sessions,
+                "data_hash": data_hash, "run_id": parent.info.run_id,
+            }, indent=2))
 
 
 if __name__ == "__main__":
