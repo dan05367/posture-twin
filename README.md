@@ -1,9 +1,10 @@
 # Posture Twin：即時坐姿矯正的 Digital Twin 與 MLOps 系統
 
 用一般視訊鏡頭即時判斷坐姿，在虛擬人偶上呈現你的身體狀態，並建立一套完整的 MLOps 閉環：**資料版本控管 → 實驗追蹤 → 服務部署 → 監控與 drift 偵測 → 使用者回饋 → 自動重新訓練 → 新模型上線**。
+![demo](docs/image/demo_image.jpg)
 
+gif 載入較慢，請稍等
 ![demo](docs/image/demo.gif)
-<!-- 放一張 GIF 或截圖：左邊是鏡頭畫面，右邊是 /ui 的人偶。面試官 10 秒內要能看懂這個專案在做什麼 -->
 
 ## 這個專案展示了什麼
 
@@ -39,7 +40,8 @@
 
 - 資料量：`4277` 筆、`3` 個 session、`5` 種姿勢
 - 推論延遲 p95：`49` ms（Grafana 面板）
-- 混淆矩陣與 MLflow 截圖：![conjuntion matrix](docs/image/confusion_matrix.png)
+- 混淆矩陣與 MLflow 截圖：
+![conjuntion matrix](docs/image/confusion_matrix.png)
 
 ## 測試與 CI
 
@@ -56,4 +58,4 @@
 
 ## 技術棧
 
-Python · MediaPipe · OpenCV · scikit-learn · FastAPI · MLflow · DVC · Docker Compose · GitHub Actions · Prometheus · Grafana · Evidently · pytest
+Python · MediaPipe · OpenCV · scikit-learn · FastAPI · MLflow · DVC · Docker Compose · GitHub Actions · Prometheus · Grafana · pytest
