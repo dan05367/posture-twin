@@ -3,7 +3,6 @@
 用一般視訊鏡頭即時判斷坐姿，在虛擬人偶上呈現你的身體狀態，並建立一套完整的 MLOps 閉環：**資料版本控管 → 實驗追蹤 → 服務部署 → 監控與 drift 偵測 → 使用者回饋 → 自動重新訓練 → 新模型上線**。
 ![demo](docs/image/demo_image.jpg)
 
-gif 載入較慢，請稍等
 ![demo](docs/image/demo.gif)
 
 ## 這個專案展示了什麼
@@ -40,7 +39,8 @@ gif 載入較慢，請稍等
 
 - 資料量：`4277` 筆、`3` 個 session、`5` 種姿勢
 - 推論延遲 p95：`49` ms（Grafana 面板）
-- 混淆矩陣與 MLflow 截圖：
+- 混淆矩陣：
+
 ![conjuntion matrix](docs/image/confusion_matrix.png)
 
 ## 測試與 CI
@@ -51,7 +51,6 @@ gif 載入較慢，請稍等
 ## 已知限制與下一步
 
 - 正面鏡頭沒有可靠的深度，人偶是 2D；3D 骨架需要側面或第二個視角
-- 模型上線把關只做「不退步」檢查，新舊模型用的資料不同；更嚴謹的做法是固定 hold-out 測試集
 - Digital twin 狀態存在記憶體，重啟會歸零，目前設計給單人使用
 - 警報尚未接 Alertmanager；回饋標註沒有檢視與刪除功能
 - 下一步：時間窗口特徵 / LSTM、hold-out 測試集評估、Alertmanager、標註管理介面
